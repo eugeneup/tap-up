@@ -12,7 +12,14 @@ namespace TapUp
 {
     internal static class GamePatch
     {
-        internal const string OriginalHash = "D6209ECCE915E15AADF4DE11191EEF5C6D3C6AAAFBD82A67C773B72070AE54CB";
+        // Eight verified Windows depot manifests share these four originals.
+        // New hashes must pass the compatibility audit before being added.
+        private static readonly string[] OriginalHashes = {
+            "D6209ECCE915E15AADF4DE11191EEF5C6D3C6AAAFBD82A67C773B72070AE54CB",
+            "D22026DF9CF2915A58582111F1D7F1525423113A201DF6F69D0A7CA36F9BDC1A",
+            "729AA44186B1EF9C209E72DF1D91466C8541892CB2C7936C6113614EBC28C30D",
+            "9D9973D8DDDBFF31648496225CDF00082D4389820CC834F74736BB39E08C1F58"
+        };
         internal const string BridgeFile = "TapUp.BongoBridge.dll";
         internal const string BridgeResource = "TapUp.GameBridge";
         internal static string Managed(string game) { return Path.Combine(game, "BongoCat_Data", "Managed"); }
@@ -39,6 +46,7 @@ namespace TapUp
             using (var sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "");
         }
         internal static string HashFile(string path) { return Hash(File.ReadAllBytes(path)); }
+        private static bool SupportedOriginal(string hash) { return Array.IndexOf(OriginalHashes, hash) >= 0; }
 
         internal static bool Installed(string game)
         {
@@ -55,8 +63,8 @@ namespace TapUp
             string original = Path.Combine(BackupDirectory(game), "Assembly-CSharp.original.dll");
             if (!File.Exists(manifest) || !File.Exists(bridge) || !File.Exists(original) || !File.Exists(GameAssembly(game))) return false;
             string[] hashes = File.ReadAllLines(manifest);
-            return hashes.Length == 3 && hashes[0] == OriginalHash &&
-                HashFile(GameAssembly(game)) == hashes[1] && HashFile(bridge) == hashes[2] && HashFile(original) == OriginalHash;
+            return hashes.Length == 3 && SupportedOriginal(hashes[0]) &&
+                HashFile(GameAssembly(game)) == hashes[1] && HashFile(bridge) == hashes[2] && HashFile(original) == hashes[0];
         }
 
         internal static string FindGame()
@@ -92,27 +100,24 @@ namespace TapUp
             if (Installed(game)) return;
             if (VerifiedInstallation(game)) Uninstall(game);
             string original = GameAssembly(game);
-            if (HashFile(original) != OriginalHash) throw new InvalidOperationException("Версия DLL отличается от проверенной. Файл игры оставлен без изменений.");
+            byte[] originalBytes = File.ReadAllBytes(original);
+            string originalHash = Hash(originalBytes);
+            if (!SupportedOriginal(originalHash)) throw new InvalidOperationException("Версия DLL отличается от проверенной. Файл игры оставлен без изменений.");
             byte[] bridge = Resource(BridgeResource);
-            byte[] patched = CreatePatched(File.ReadAllBytes(original), bridge);
+            byte[] patched = CreatePatched(originalBytes, bridge);
             string directory = BackupDirectory(game);
-            Directory.CreateDirectory(directory);
-            string backup = Path.Combine(directory, "Assembly-CSharp.original.dll");
-            if (File.Exists(backup))
-            {
-                if (HashFile(backup) != OriginalHash) throw new InvalidOperationException("Резервная копия не прошла проверку. Установка остановлена.");
-            }
-            else File.Copy(original, backup);
             string bridgePath = Path.Combine(Managed(game), BridgeFile);
             if (File.Exists(bridgePath) && HashFile(bridgePath) != Hash(bridge))
                 throw new InvalidOperationException("В папке игры уже есть другой мост Tap-Up. Сначала удалите прежнее подключение.");
+            Directory.CreateDirectory(directory);
+            string backup = PrepareBackup(directory, originalBytes, originalHash);
             File.WriteAllBytes(bridgePath, bridge);
             string staged = Path.Combine(directory, "Assembly-CSharp.staged.dll");
             File.WriteAllBytes(staged, patched);
             try
             {
                 ReplaceFile(staged, original);
-                File.WriteAllLines(Path.Combine(directory, "patch.txt"), new[] { OriginalHash, Hash(patched), Hash(bridge) });
+                File.WriteAllLines(Path.Combine(directory, "patch.txt"), new[] { originalHash, Hash(patched), Hash(bridge) });
             }
             catch
             {
@@ -121,6 +126,29 @@ namespace TapUp
                 throw;
             }
             finally { if (File.Exists(staged)) File.Delete(staged); }
+        }
+
+        private static string PrepareBackup(string directory, byte[] original, string originalHash)
+        {
+            string backup = Path.Combine(directory, "Assembly-CSharp.original.dll");
+            if (!File.Exists(backup)) { File.WriteAllBytes(backup, original); return backup; }
+            byte[] previous = File.ReadAllBytes(backup);
+            string previousHash = Hash(previous);
+            if (previousHash == originalHash) return backup;
+            if (!SupportedOriginal(previousHash)) throw new InvalidOperationException("Резервная копия не прошла проверку. Установка остановлена.");
+            // Steam may replace a patched game with another verified original.
+            // Keep the previous backup, then atomically prepare the current one.
+            string archive = Path.Combine(directory, "Assembly-CSharp." + previousHash + ".original.dll");
+            if (File.Exists(archive))
+            {
+                if (HashFile(archive) != previousHash) throw new InvalidOperationException("Резервная копия не прошла проверку. Установка остановлена.");
+            }
+            else File.WriteAllBytes(archive, previous);
+            string staged = Path.Combine(directory, "Assembly-CSharp.backup.staged.dll");
+            File.WriteAllBytes(staged, original);
+            try { ReplaceFile(staged, backup); }
+            finally { if (File.Exists(staged)) File.Delete(staged); }
+            return backup;
         }
 
         internal static void Uninstall(string game)
@@ -156,7 +184,7 @@ namespace TapUp
 
         internal static byte[] CreatePatched(byte[] original, byte[] bridge)
         {
-            if (Hash(original) != OriginalHash) throw new InvalidOperationException("Unsupported BongoCat assembly");
+            if (!SupportedOriginal(Hash(original))) throw new InvalidOperationException("Unsupported BongoCat assembly");
             using (var source = AssemblyDefinition.ReadAssembly(new MemoryStream(original)))
             using (var helper = AssemblyDefinition.ReadAssembly(new MemoryStream(bridge)))
             {
