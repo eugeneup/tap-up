@@ -18,6 +18,7 @@ try {
     & $compiler /nologo /target:winexe /platform:x64 /optimize+ /warnaserror+ /win32manifest:app.manifest /win32icon:assets\Tap-Up.ico /out:dist\Tap-Up.exe /reference:System.Windows.Forms.dll /reference:System.Drawing.dll @gameReferences @appSources
     if ($LASTEXITCODE -ne 0) { throw 'Application build failed.' }
     Copy-Item -LiteralPath README.md -Destination dist\README.md -Force
+    Copy-Item -LiteralPath LICENSE -Destination dist\LICENSE -Force
     @('Mono.Cecil 0.11.6 (MIT)', 'https://github.com/jbevain/cecil', '', (Get-Content -LiteralPath vendor\Mono.Cecil.LICENSE.txt -Raw)) | Set-Content -LiteralPath dist\THIRD-PARTY-NOTICES.txt -Encoding utf8
     if ($BuildTools) {
         & $compiler /nologo /target:exe /main:GamePatchCli /platform:x64 /optimize+ /warnaserror+ /out:build\GamePatch.exe @gameReferences src\GamePatch.cs tools\GamePatchCli.cs
