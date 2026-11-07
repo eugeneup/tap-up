@@ -1,0 +1,35 @@
+# Generated builds, packages and validation artifacts
+/build/
+/dist/
+*.exe
+*.dll
+*.pdb
+*.zip
+!/vendor/Mono.Cecil.dll
+
+# Local tests and development diagnostics
+/tests/
+/tools/*
+!/tools/PrepareBridge.cs
+!/tools/GamePatchCli.cs
+!/tools/ChestProbe.cs
+!/tools/VerifyBongo.cs
+!/tools/VerifyBongoWindow.cs
+/assets/Tap-Up-preview.png
+
+# Local agent instructions, editor settings and credentials
+/AGENTS.md
+/.agents/
+/.codex/
+/.vs/
+/.vscode/
+.env
+.env.*
+*.user
+*.suo
+*.log
+*.tmp
+*.bak
+__pycache__/
+Thumbs.db
+Desktop.ini
