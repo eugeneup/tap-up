@@ -8,7 +8,7 @@ using Microsoft.Win32;
 
 [assembly: System.Reflection.AssemblyTitle("Tap-Up")]
 [assembly: System.Reflection.AssemblyDescription("Compact F13 tapper for Bongo Cat")]
-[assembly: System.Reflection.AssemblyVersion("1.4.5.0")]
+[assembly: System.Reflection.AssemblyVersion("1.4.6.0")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8")]
 
 namespace TapUp
