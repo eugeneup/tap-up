@@ -89,15 +89,33 @@ namespace TapUp
         public long SkinsCollected { get { return sessionCounter.SkinsCollected; } }
         public long EmotesCollected { get { return sessionCounter.EmotesCollected; } }
         public bool Running { get { return running; } }
-        internal ChestConnection() : this(FindGameId) { }
+        internal ChestConnection() : this(() => FindGameId()) { }
         internal ChestConnection(Func<int> gameId) { this.gameId = gameId; }
-        private static int FindGameId()
+        internal static int FindGameId(int? sessionId = null)
         {
             Process[] games = Process.GetProcessesByName("BongoCat");
-            int id = games.Length == 1 ? games[0].Id : 0;
-            foreach (Process game in games) game.Dispose();
-            return id;
+            try
+            {
+                int id = 0;
+                foreach (Process game in games)
+                {
+                    if (sessionId.HasValue && !InSession(game, sessionId.Value)) continue;
+                    if (id != 0) return 0;
+                    id = game.Id;
+                }
+                return id;
+            }
+            finally { foreach (Process game in games) game.Dispose(); }
         }
+
+        internal static bool InSession(Process process, int sessionId)
+        {
+            try { return process.SessionId == sessionId; }
+            catch (InvalidOperationException) { return false; }
+            catch (System.ComponentModel.Win32Exception) { return false; }
+        }
+
+        internal static string PipeName(int gameId) { return "TapUp.BongoCat." + gameId; }
 
         public void Start() { Start(3); }
         internal void Start(int mask)
@@ -125,7 +143,7 @@ namespace TapUp
             {
                 int id = gameId();
                 if (id == 0) throw new InvalidOperationException("Запустите один экземпляр BongoCat.");
-                var connection = new NamedPipeClientStream(".", "TapUp.BongoCat." + id, PipeDirection.InOut, PipeOptions.Asynchronous);
+                var connection = new NamedPipeClientStream(".", PipeName(id), PipeDirection.InOut, PipeOptions.Asynchronous);
                 lock (gate) pipe = connection;
                 connection.Connect(2000);
                 using (var reader = new StreamReader(connection))

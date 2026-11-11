@@ -8,7 +8,7 @@ using Microsoft.Win32;
 
 [assembly: System.Reflection.AssemblyTitle("Tap-Up")]
 [assembly: System.Reflection.AssemblyDescription("Compact F13 tapper for Bongo Cat")]
-[assembly: System.Reflection.AssemblyVersion("1.4.7.0")]
+[assembly: System.Reflection.AssemblyVersion("1.4.8.0")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8")]
 
 namespace TapUp
@@ -16,14 +16,18 @@ namespace TapUp
     internal static class Program
     {
         [STAThread]
-        private static void Main()
+        private static void Main(string[] args)
         {
             AppDomain.CurrentDomain.AssemblyResolve += GamePatch.ResolveDependency;
+            const string instanceName = @"Local\TapUp.Clicker.v1";
+            bool logonStartup = args.Length == 1 && args[0] == WindowsStartup.Argument;
+            if (logonStartup && !WindowsStartup.WaitForLogonApps(instanceName)) return;
             bool created;
-            using (var instance = new Mutex(true, @"Local\TapUp.Clicker.v1", out created))
+            using (var instance = new Mutex(true, instanceName, out created))
             {
                 if (!created)
                 {
+                    if (logonStartup) return;
                     IntPtr existing = FindWindow(null, "Tap-Up");
                     if (existing != IntPtr.Zero) RestoreWindow(existing);
                     return;
@@ -33,7 +37,7 @@ namespace TapUp
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 using (var engine = new TapEngine(new NativeInput()))
-                using (var form = new MainForm(engine)) Application.Run(form);
+                using (var form = new MainForm(engine, logonStartup)) Application.Run(form);
                 instance.ReleaseMutex();
             }
         }
@@ -91,10 +95,10 @@ namespace TapUp
         internal static readonly Color Accent = Color.FromArgb(165, 240, 197);
         internal static readonly Color Header = Color.FromArgb(28, 36, 35);
 
-        internal MainForm(TapEngine engine) : this(engine, new ChestConnection(), null, null, null) { }
+        internal MainForm(TapEngine engine, bool logonStartup) : this(engine, new ChestConnection(), null, null, null, logonStartup) { }
 
         internal MainForm(TapEngine engine, IChestCollector collector, ChestSettings settings,
-            Action<ChestSettings> saveSettings, Func<string, bool> installed)
+            Action<ChestSettings> saveSettings, Func<string, bool> installed, bool logonStartup = false)
         {
             this.engine = engine;
             this.collector = collector;
@@ -163,6 +167,7 @@ namespace TapUp
             SystemEvents.SessionSwitch += SessionChanged;
             RefreshInstallation();
             RefreshStatus();
+            if (logonStartup && chestSettings.MinimizeAtLogon) WindowState = FormWindowState.Minimized;
         }
 
         protected override void OnShown(EventArgs e)
@@ -171,6 +176,7 @@ namespace TapUp
             RefreshInstallation();
             ApplyAutoCollection();
             RefreshStatus();
+            if (WindowState == FormWindowState.Minimized) MoveMinimizedWindowToTray();
         }
 
         protected override void OnActivated(EventArgs e)
@@ -331,8 +337,9 @@ namespace TapUp
                         SaveChestSettings();
                         RefreshStatus();
                     };
-                    dialog.MinimizeToTrayChanged += delegate(bool enabled) {
-                        chestSettings.MinimizeToTray = enabled;
+                    dialog.WindowPreferencesChanged += delegate {
+                        chestSettings.MinimizeToTray = dialog.Settings.MinimizeToTray;
+                        chestSettings.MinimizeAtLogon = dialog.Settings.MinimizeAtLogon;
                         SaveChestSettings();
                         RefreshStatus();
                     };
@@ -422,17 +429,20 @@ namespace TapUp
             displayUpdates = WindowState != FormWindowState.Minimized;
             if (counter != null && !layingOut) RefreshStatus();
             if (trayIcon == null || closing) return;
-            if (!displayUpdates && chestSettings.MinimizeToTray && Visible && !trayIcon.Visible)
-            {
-                trayIcon.Visible = true;
-                Hide();
-            }
-            else if (displayUpdates && trayIcon.Visible)
+            if (!displayUpdates) MoveMinimizedWindowToTray();
+            else if (trayIcon.Visible)
             {
                 trayIcon.Visible = false;
                 // SW_RESTORE also comes from the second-instance path. Sync WinForms visibility.
                 if (!Visible) Show();
             }
+        }
+
+        private void MoveMinimizedWindowToTray()
+        {
+            if (!chestSettings.MinimizeToTray || !Visible || trayIcon.Visible) return;
+            trayIcon.Visible = true;
+            Hide();
         }
 
         protected override void OnPaint(PaintEventArgs e)

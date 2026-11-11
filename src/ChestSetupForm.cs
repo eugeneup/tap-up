@@ -12,8 +12,8 @@ namespace TapUp
     {
         internal ChestSettings Settings { get; private set; }
         internal event Action<string> PathConnected;
-        internal event Action<bool> MinimizeToTrayChanged;
-        private static readonly Size DialogSize = new Size(440, 285);
+        internal event Action WindowPreferencesChanged;
+        private static readonly Size DialogSize = new Size(440, 349);
         private readonly Dictionary<Control, Rectangle> layout = new Dictionary<Control, Rectangle>();
         private readonly Font dialogFont = new Font("Segoe UI", 9);
         private readonly Font sectionFont;
@@ -27,7 +27,8 @@ namespace TapUp
         internal ChestSetupForm(ChestSettings settings, Icon icon) : this(settings, icon, GamePatch.Installed,
             delegate(string path, bool add) { if (add) GamePatch.Install(path); else GamePatch.Uninstall(path); }) { }
 
-        internal ChestSetupForm(ChestSettings settings, Icon icon, Func<string, bool> installed, Action<string, bool> change)
+        internal ChestSetupForm(ChestSettings settings, Icon icon, Func<string, bool> installed, Action<string, bool> change,
+            Func<bool> readStartup = null, Action<bool> changeStartup = null)
         {
             Settings = settings.Clone();
             this.installed = installed;
@@ -48,41 +49,67 @@ namespace TapUp
                 TextAlign = ContentAlignment.MiddleLeft };
             var minimizeToTray = new OutlineCheckBox { Text = "Сворачивать в область уведомлений",
                 Checked = Settings.MinimizeToTray, Bounds = new Rectangle(20, 36, 404, 28) };
-            minimizeToTray.CheckedChanged += delegate {
+            var minimizeAtLogon = new OutlineCheckBox { Text = "Запускать свёрнутым при старте Windows",
+                Checked = Settings.MinimizeAtLogon, Enabled = false, Bounds = new Rectangle(20, 100, 404, 28) };
+            EventHandler saveWindowPreferences = delegate {
                 Settings.MinimizeToTray = minimizeToTray.Checked;
-                var changed = MinimizeToTrayChanged;
-                if (changed != null) changed(Settings.MinimizeToTray);
+                Settings.MinimizeAtLogon = minimizeAtLogon.Checked;
+                var changed = WindowPreferencesChanged;
+                if (changed != null) changed();
             };
-            var chestTitle = new Label { Text = "Автосбор сундуков", Font = sectionFont, Bounds = new Rectangle(16, 76, 408, 24),
+            minimizeToTray.CheckedChanged += saveWindowPreferences;
+            minimizeAtLogon.CheckedChanged += saveWindowPreferences;
+            var startWithWindows = new OutlineCheckBox { Text = "Автозапуск при старте Windows", AutoCheck = false,
+                Bounds = new Rectangle(20, 68, 404, 28) };
+            startWithWindows.CheckedChanged += delegate { minimizeAtLogon.Enabled = startWithWindows.Checked; };
+            var saveStartup = changeStartup ?? WindowsStartup.SetEnabled;
+            startWithWindows.Click += delegate {
+                bool enable = !startWithWindows.Checked;
+                try
+                {
+                    saveStartup(enable);
+                    startWithWindows.Checked = enable;
+                    SetError("");
+                }
+                catch (Exception ex) { SetError("Не удалось изменить автозапуск Windows.\n" + ex.Message); }
+            };
+            var chestTitle = new Label { Text = "Автосбор сундуков", Font = sectionFont, Bounds = new Rectangle(16, 140, 408, 24),
                 TextAlign = ContentAlignment.MiddleLeft };
-            var title = new Label { Text = "Путь до BongoCat", Bounds = new Rectangle(16, 105, 126, 26),
+            var title = new Label { Text = "Путь до BongoCat", Bounds = new Rectangle(16, 169, 126, 26),
                 TextAlign = ContentAlignment.MiddleLeft };
-            var info = new PathInfoButton { Bounds = new Rectangle(146, 107, 20, 22),
+            var info = new PathInfoButton { Bounds = new Rectangle(146, 171, 20, 22),
                 AccessibleName = "Как найти папку BongoCat", ForeColor = Color.FromArgb(165, 174, 188) };
             const string instructions = "В Steam откройте свойства Bongo Cat → «Установленные файлы» → «Обзор…».\nВыберите папку, в которой находится BongoCat.exe.";
             help.SetToolTip(info, instructions);
             info.AccessibleDescription = instructions;
             info.Click += delegate { help.Show(instructions, info, 0, info.Height + 4, 15000); };
-            gamePath = new TextBox { Text = settings.GameDirectory, Bounds = new Rectangle(16, 143, 310, 26),
+            gamePath = new TextBox { Text = settings.GameDirectory, Bounds = new Rectangle(16, 207, 310, 26),
                 AccessibleName = "Папка BongoCat", BackColor = Color.FromArgb(28, 36, 35), ForeColor = Color.White };
-            var browse = new InputSafeButton { Text = "Папка…", Bounds = new Rectangle(336, 139, 88, 30) };
+            var browse = new InputSafeButton { Text = "Папка…", Bounds = new Rectangle(336, 203, 88, 30) };
             browse.Click += delegate {
                 using (var picker = new FolderBrowserDialog { Description = "Папка, содержащая BongoCat.exe", SelectedPath = gamePath.Text })
                     if (picker.ShowDialog(this) == DialogResult.OK) gamePath.Text = picker.SelectedPath;
             };
-            connection = new InputSafeButton { Bounds = new Rectangle(16, 187, 194, 34),
+            connection = new InputSafeButton { Bounds = new Rectangle(16, 251, 194, 34),
                 AccessibleName = "Управление подключением" };
             connection.Click += delegate { ToggleConnection(); };
-            status = new Label { Bounds = new Rectangle(230, 187, 194, 34), TextAlign = ContentAlignment.MiddleRight,
+            status = new Label { Bounds = new Rectangle(230, 251, 194, 34), TextAlign = ContentAlignment.MiddleRight,
                 AccessibleName = "Статус подключения" };
-            error = new Label { Bounds = new Rectangle(16, 230, 408, 44), Visible = false,
-                AccessibleName = "Ошибка подключения", ForeColor = Color.FromArgb(255, 169, 154), AutoEllipsis = true };
-            close = new InputSafeButton { Text = "Закрыть", DialogResult = DialogResult.Cancel, Bounds = new Rectangle(332, 237, 92, 32) };
-            Controls.AddRange(new Control[] { systemTitle, minimizeToTray, chestTitle, title, info, gamePath, browse, connection, status, error, close });
+            error = new Label { Bounds = new Rectangle(16, 294, 408, 44), Visible = false,
+                AccessibleName = "Ошибка настроек", ForeColor = Color.FromArgb(255, 169, 154), AutoEllipsis = true };
+            close = new InputSafeButton { Text = "Закрыть", DialogResult = DialogResult.Cancel, Bounds = new Rectangle(332, 301, 92, 32) };
+            Controls.AddRange(new Control[] { systemTitle, minimizeToTray, startWithWindows, minimizeAtLogon, chestTitle, title, info,
+                gamePath, browse, connection, status, error, close });
             AcceptButton = close; CancelButton = close;
             gamePath.TextChanged += delegate { RefreshInstallation(); };
             foreach (Control control in Controls) layout.Add(control, control.Bounds);
             RefreshInstallation();
+            try { startWithWindows.Checked = (readStartup ?? WindowsStartup.IsEnabled)(); }
+            catch (Exception ex)
+            {
+                startWithWindows.Enabled = false;
+                SetError("Не удалось прочитать настройку автозапуска Windows.\n" + ex.Message);
+            }
         }
 
         private void ToggleConnection()
@@ -99,7 +126,7 @@ namespace TapUp
                 }
                 RefreshInstallation();
             }
-            catch (Exception ex) { ShowError(ex.Message); }
+            catch (Exception ex) { SetError(ex.Message); }
         }
 
         private void RefreshInstallation()
@@ -113,18 +140,16 @@ namespace TapUp
                 status.ForeColor = connected ? MainForm.Accent : MainForm.Muted;
                 status.AccessibleDescription = status.Text;
                 connection.Enabled = valid;
-                error.Text = "";
-                error.Visible = false;
-                if (IsHandleCreated) ApplyDpi();
+                SetError("");
             }
-            catch (Exception ex) { ShowError(ex.Message); }
+            catch (Exception ex) { SetError(ex.Message); }
         }
 
-        private void ShowError(string text)
+        private void SetError(string text)
         {
             error.Text = text;
             error.AccessibleDescription = text;
-            error.Visible = true;
+            error.Visible = text.Length != 0;
             if (IsHandleCreated) ApplyDpi();
         }
 
@@ -176,8 +201,9 @@ namespace TapUp
             float top = (Height - size) / 2;
             float corner = 4 * scale;
             var mark = new RectangleF(scale, top, size, size);
+            Color markColor = Enabled ? MainForm.Accent : MainForm.Muted;
             using (var outline = new GraphicsPath())
-            using (var pen = new Pen(MainForm.Accent, 1.5f * scale) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+            using (var pen = new Pen(markColor, 1.5f * scale) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
             {
                 outline.AddArc(mark.Left, mark.Top, corner, corner, 180, 90);
                 outline.AddArc(mark.Right - corner, mark.Top, corner, corner, 270, 90);
@@ -190,7 +216,7 @@ namespace TapUp
                         new PointF(6 * scale, top + 8 * scale), new PointF(10 * scale, top + 4 * scale) });
             }
             int labelLeft = (int)Math.Round(18 * scale);
-            Color labelColor = Checked ? MainForm.Accent : ForeColor;
+            Color labelColor = Enabled && !Checked ? ForeColor : markColor;
             TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(labelLeft, 0, Width - labelLeft, Height),
                 labelColor, TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
             if (Focused && ShowFocusCues) ControlPaint.DrawFocusRectangle(e.Graphics, ClientRectangle, labelColor, BackColor);

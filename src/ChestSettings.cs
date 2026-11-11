@@ -8,6 +8,7 @@ namespace TapUp
     {
         internal bool Enabled;
         internal bool MinimizeToTray;
+        internal bool MinimizeAtLogon;
         internal string GameDirectory = "";
         internal static readonly string FilePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Tap-Up", "chests.xml");
@@ -23,7 +24,8 @@ namespace TapUp
         }
         internal ChestSettings Clone()
         {
-            return new ChestSettings { Enabled = Enabled, MinimizeToTray = MinimizeToTray, GameDirectory = GameDirectory };
+            return new ChestSettings { Enabled = Enabled, MinimizeToTray = MinimizeToTray,
+                MinimizeAtLogon = MinimizeAtLogon, GameDirectory = GameDirectory };
         }
         internal static ChestSettings Load(string path)
         {
@@ -37,6 +39,7 @@ namespace TapUp
                 if (doc.DocumentElement == null || doc.DocumentElement.Name != "chests") throw new InvalidDataException("Некорректные настройки сундуков");
                 settings.Enabled = doc.DocumentElement.GetAttribute("enabled") == "true";
                 settings.MinimizeToTray = doc.DocumentElement.GetAttribute("showTrayIcon") == "true";
+                settings.MinimizeAtLogon = doc.DocumentElement.GetAttribute("minimizeAtLogon") == "true";
                 settings.GameDirectory = doc.DocumentElement.GetAttribute("game");
                 // Version 1.3 coordinate templates are intentionally ignored.
                 if (settings.GameDirectory.Length == 0) settings.GameDirectory = GamePatch.FindGame();
@@ -55,6 +58,7 @@ namespace TapUp
                     writer.WriteAttributeString("version", "2");
                     writer.WriteAttributeString("enabled", Enabled ? "true" : "false");
                     writer.WriteAttributeString("showTrayIcon", MinimizeToTray ? "true" : "false");
+                    writer.WriteAttributeString("minimizeAtLogon", MinimizeAtLogon ? "true" : "false");
                     writer.WriteAttributeString("game", GameDirectory);
                     writer.WriteEndElement();
                 }
