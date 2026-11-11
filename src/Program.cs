@@ -8,7 +8,7 @@ using Microsoft.Win32;
 
 [assembly: System.Reflection.AssemblyTitle("Tap-Up")]
 [assembly: System.Reflection.AssemblyDescription("Compact F13 tapper for Bongo Cat")]
-[assembly: System.Reflection.AssemblyVersion("1.4.6.0")]
+[assembly: System.Reflection.AssemblyVersion("1.4.7.0")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8")]
 
 namespace TapUp
@@ -25,7 +25,7 @@ namespace TapUp
                 if (!created)
                 {
                     IntPtr existing = FindWindow(null, "Tap-Up");
-                    if (existing != IntPtr.Zero) { ShowWindow(existing, 9); SetForegroundWindow(existing); }
+                    if (existing != IntPtr.Zero) RestoreWindow(existing);
                     return;
                 }
                 try { SetProcessDpiAwarenessContext(new IntPtr(-4)); }
@@ -36,6 +36,12 @@ namespace TapUp
                 using (var form = new MainForm(engine)) Application.Run(form);
                 instance.ReleaseMutex();
             }
+        }
+
+        internal static void RestoreWindow(IntPtr window)
+        {
+            ShowWindow(window, 9); // SW_RESTORE also restores a hidden, minimized HWND.
+            SetForegroundWindow(window);
         }
 
         [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr context);
@@ -54,15 +60,15 @@ namespace TapUp
         private readonly Label counter;
         private readonly Label chestStatus;
         private readonly Label chestCounter;
-        private readonly InputSafeCheckBox autoChests;
-        private readonly InputSafeButton configureChests;
+        private readonly OutlineCheckBox autoChests;
+        private readonly SettingsButton settingsButton;
         private ChestSettings chestSettings;
         private readonly IChestCollector collector;
         private readonly Action<ChestSettings> saveSettings;
         private readonly Func<string, bool> installed;
         private bool gameInstalled;
         private volatile bool collectionSuspended;
-        private string chestError;
+        private string settingsError, settingsErrorNotice, installationError;
         private bool configuring;
         private bool layingOut;
         private int contentHeight = 238;
@@ -74,13 +80,15 @@ namespace TapUp
         private volatile bool closing;
         private readonly Font captionFont = new Font("Segoe UI", 12, FontStyle.Regular, GraphicsUnit.Pixel);
         private readonly Font counterFont = new Font("Segoe UI", 9);
+        private readonly Font settingsFont = new Font("Segoe MDL2 Assets", 16);
         private readonly Icon appIcon;
+        private NotifyIcon trayIcon;
         private float dpiScale = 1;
         private bool hotkey;
         private string notice;
         private static readonly Color Background = Color.FromArgb(19, 21, 26);
-        private static readonly Color Muted = Color.FromArgb(141, 149, 165);
-        private static readonly Color Accent = Color.FromArgb(165, 240, 197);
+        internal static readonly Color Muted = Color.FromArgb(141, 149, 165);
+        internal static readonly Color Accent = Color.FromArgb(165, 240, 197);
         internal static readonly Color Header = Color.FromArgb(28, 36, 35);
 
         internal MainForm(TapEngine engine) : this(engine, new ChestConnection(), null, null, null) { }
@@ -108,6 +116,10 @@ namespace TapUp
 
             toggle = new TapButton { Text = "Tap-Up", TabIndex = 0 };
             toggle.Click += delegate { Toggle(); };
+            settingsButton = new SettingsButton { Text = "\uE713", Font = settingsFont, TabIndex = 1,
+                AccessibleName = "Настройки", FlatStyle = FlatStyle.Flat, ForeColor = Muted, Cursor = Cursors.Hand };
+            settingsButton.FlatAppearance.BorderSize = 0;
+            settingsButton.Click += delegate { ConfigureChests(); };
             minimize = new CaptionButton(false) { AccessibleName = "Свернуть", TabStop = false };
             minimize.Click += delegate { WindowState = FormWindowState.Minimized; };
             close = new CaptionButton(true) { AccessibleName = "Закрыть", TabStop = false };
@@ -115,31 +127,32 @@ namespace TapUp
             counter = new Label { AutoSize = false, Font = counterFont, ForeColor = Muted,
                 Text = "Кликов совершено: 0", TextAlign = ContentAlignment.MiddleLeft, AccessibleName = "Счётчик кликов" };
             try { chestSettings = settings ?? ChestSettings.Load(ChestSettings.FilePath); }
-            catch (Exception ex) { chestSettings = new ChestSettings(); chestError = "Не удалось прочитать настройки: " + ex.Message; }
+            catch (Exception ex)
+            {
+                chestSettings = new ChestSettings();
+                settingsError = ex.Message;
+                settingsErrorNotice = "Не удалось прочитать настройки\nПроверьте файл настроек chests.xml";
+            }
+            trayIcon = new NotifyIcon { Icon = appIcon, Text = Text };
+            trayIcon.MouseClick += delegate(object sender, MouseEventArgs e) {
+                if (e.Button == MouseButtons.Left) Program.RestoreWindow(Handle);
+            };
             collector.Changed += ChestChanged;
-            autoChests = new InputSafeCheckBox { Text = "Автосбор сундуков", Checked = chestSettings.Enabled,
-                Font = counterFont, ForeColor = Accent, TabIndex = 1, AccessibleName = "Автосбор сундуков" };
+            autoChests = new OutlineCheckBox { Text = "Автосбор сундуков", Checked = chestSettings.Enabled,
+                Font = counterFont, TabIndex = 2, AccessibleName = "Автосбор сундуков" };
             autoChests.CheckedChanged += delegate {
                 RefreshInstallation();
-                if (autoChests.Checked && !gameInstalled)
-                {
-                    ConfigureChests();
-                    if (!gameInstalled) { autoChests.Checked = false; return; }
-                }
                 collectionSuspended = false;
                 chestSettings.Enabled = autoChests.Checked;
                 SaveChestSettings();
                 ApplyAutoCollection();
                 RefreshStatus();
             };
-            configureChests = new InputSafeButton { Text = "Подключить…", Font = counterFont, TabIndex = 2,
-                AccessibleName = "Подключить BongoCat", FlatStyle = FlatStyle.Flat, ForeColor = Muted };
-            configureChests.Click += delegate { ConfigureChests(); };
-            chestStatus = new StatusNotice { AutoSize = false, Font = counterFont, ForeColor = Muted,
+            chestStatus = new StatusNotice { AutoSize = false, Font = counterFont, ForeColor = Color.FromArgb(255, 169, 154),
                 AccessibleName = "Состояние автосбора", AutoEllipsis = true, TextAlign = ContentAlignment.MiddleLeft };
             chestCounter = new Label { AutoSize = false, Font = counterFont, ForeColor = Muted,
                 AccessibleName = "Счётчик сундуков", Text = "Скинов собрано: 0\nЭмоций собрано: 0", TextAlign = ContentAlignment.MiddleLeft };
-            Controls.AddRange(new Control[] { toggle, minimize, close, counter, autoChests, configureChests, chestCounter, chestStatus });
+            Controls.AddRange(new Control[] { toggle, settingsButton, minimize, close, counter, autoChests, chestCounter, chestStatus });
             refreshAction = delegate {
                 Interlocked.Exchange(ref refreshQueued, 0);
                 if (!IsDisposed && !Disposing) RefreshStatus();
@@ -163,7 +176,7 @@ namespace TapUp
         protected override void OnActivated(EventArgs e)
         {
             base.OnActivated(e);
-            if (configureChests == null || configuring) return;
+            if (chestStatus == null || configuring) return;
             bool before = gameInstalled;
             RefreshInstallation();
             if (before != gameInstalled) ApplyAutoCollection();
@@ -234,20 +247,21 @@ namespace TapUp
                 // can reserve an invisible caption when the system-menu style is set.
                 bool hasStatistics = autoChests != null && autoChests.Checked;
                 bool hasNotice = chestStatus != null && chestStatus.Text.Length != 0;
-                contentHeight = hasStatistics || hasNotice ? 238 : 198;
+                int noticeTop = hasStatistics ? 238 : 192;
+                contentHeight = hasNotice ? noticeTop + 46 : hasStatistics ? 238 : 198;
                 Size desired = new Size((int)Math.Round(328 * dpiScale), (int)Math.Round(contentHeight * dpiScale));
                 if (chestCounter != null && lastLayoutHeight == contentHeight && lastLayoutScale == dpiScale && Size == desired) return;
                 if (Size != desired) Size = desired;
-                if (toggle != null) toggle.Bounds = ScaleBounds(16, 56, 296, 62);
+                if (toggle != null) toggle.Bounds = ScaleBounds(16, 56, 244, 62);
+                if (settingsButton != null) settingsButton.Bounds = ScaleBounds(272, 67, 40, 40);
                 if (minimize != null) minimize.Bounds = ScaleBounds(248, 0, 40, 44);
                 if (close != null) close.Bounds = ScaleBounds(288, 0, 40, 44);
                 if (counter != null) counter.Bounds = ScaleBounds(19, 128, 293, 24);
                 if (autoChests != null) autoChests.Bounds = ScaleBounds(19, 160, 174, 28);
-                if (configureChests != null) configureChests.Bounds = ScaleBounds(200, 158, 112, 30);
                 if (chestCounter != null) chestCounter.Bounds = ScaleBounds(19, 192, 174, 38);
                 if (chestStatus != null)
                 {
-                    chestStatus.Bounds = ScaleBounds(200, 192, 112, 38);
+                    chestStatus.Bounds = ScaleBounds(16, noticeTop, 296, 38);
                     chestStatus.Padding = new Padding((int)Math.Round(5 * dpiScale), 0, (int)Math.Round(3 * dpiScale), 0);
                 }
                 if (chestCounter != null) { lastLayoutHeight = contentHeight; lastLayoutScale = dpiScale; }
@@ -275,11 +289,12 @@ namespace TapUp
 
         private void RefreshInstallation()
         {
-            try { gameInstalled = installed(chestSettings.GameDirectory); }
-            catch (Exception ex) { gameInstalled = false; chestError = ex.Message; }
-            if (configureChests == null) return;
-            configureChests.Text = gameInstalled ? "✓ Подключено" : "Подключить…";
-            configureChests.ForeColor = gameInstalled ? Accent : Muted;
+            try
+            {
+                gameInstalled = installed(chestSettings.GameDirectory);
+                installationError = null;
+            }
+            catch (Exception ex) { gameInstalled = false; installationError = ex.Message; }
         }
 
         private void ApplyAutoCollection()
@@ -293,8 +308,12 @@ namespace TapUp
 
         private void SaveChestSettings()
         {
-            try { saveSettings(chestSettings); chestError = null; }
-            catch (Exception ex) { chestError = "Не удалось сохранить настройки: " + ex.Message; }
+            try { saveSettings(chestSettings); settingsError = null; }
+            catch (Exception ex)
+            {
+                settingsError = ex.Message;
+                settingsErrorNotice = "Не удалось сохранить настройки\nПроверьте права на папку настроек";
+            }
         }
 
         private void ConfigureChests()
@@ -309,6 +328,11 @@ namespace TapUp
                 {
                     dialog.PathConnected += delegate(string path) {
                         chestSettings.GameDirectory = path;
+                        SaveChestSettings();
+                        RefreshStatus();
+                    };
+                    dialog.MinimizeToTrayChanged += delegate(bool enabled) {
+                        chestSettings.MinimizeToTray = enabled;
                         SaveChestSettings();
                         RefreshStatus();
                     };
@@ -344,17 +368,35 @@ namespace TapUp
                 string chestText = "Скинов собрано: " + collector.SkinsCollected.ToString("N0") +
                     "\nЭмоций собрано: " + collector.EmotesCollected.ToString("N0");
                 if (chestCounter.Text != chestText) chestCounter.Text = chestText;
-                string status = chestError ?? (autoChests.Checked ?
-                    collectionSuspended ? "Автосбор приостановлен" : !gameInstalled ? "Подключите BongoCat" : collector.Error : null) ?? "";
-                string noticeText = status.Length == 0 ? "" : chestError != null ? "Ошибка\nнастроек" :
-                    collectionSuspended ? "Сбор\nприостановлен" : !gameInstalled ? "Игра не\nподключена" :
-                    status.IndexOf("Steam", StringComparison.OrdinalIgnoreCase) >= 0 ? "Ошибка\nSteam" : "Нет связи\nс BongoCat";
-                if (chestStatus.Text != noticeText) chestStatus.Text = noticeText;
-                chestStatus.Visible = status.Length != 0;
-                if (chestStatus.AccessibleDescription != status) chestStatus.AccessibleDescription = status;
-                chestStatus.ForeColor = Color.FromArgb(255, 169, 154);
+                RefreshChestNotice();
                 LayoutContent();
             }
+        }
+
+        private void RefreshChestNotice()
+        {
+            string text = "";
+            string detail = settingsError ?? installationError;
+            if (settingsError != null) text = settingsErrorNotice;
+            else if (installationError != null)
+                text = "Не удалось проверить подключение\nПроверьте путь к BongoCat в настройках";
+            else if (autoChests.Checked)
+            {
+                if (!gameInstalled) text = "Игра не подключена\nПодключите BongoCat в настройках";
+                else if (collectionSuspended) text = "Автосбор приостановлен\nЗаново включите автосбор";
+                else
+                {
+                    detail = collector.Error;
+                    if (!String.IsNullOrEmpty(detail))
+                        text = detail == ChestConnection.SteamExchangeError
+                            ? "Не удалось собрать сундук в Steam\nПроверьте соединение со Steam"
+                            : "Нет связи с BongoCat\nВключите BongoCat и заново включите автосбор";
+                }
+            }
+            if (chestStatus.Text != text) chestStatus.Text = text;
+            chestStatus.Visible = text.Length != 0;
+            string description = detail ?? text;
+            if (chestStatus.AccessibleDescription != description) chestStatus.AccessibleDescription = description;
         }
 
         private void PulseCompleted(long count)
@@ -379,6 +421,18 @@ namespace TapUp
             base.OnResize(e);
             displayUpdates = WindowState != FormWindowState.Minimized;
             if (counter != null && !layingOut) RefreshStatus();
+            if (trayIcon == null || closing) return;
+            if (!displayUpdates && chestSettings.MinimizeToTray && Visible && !trayIcon.Visible)
+            {
+                trayIcon.Visible = true;
+                Hide();
+            }
+            else if (displayUpdates && trayIcon.Visible)
+            {
+                trayIcon.Visible = false;
+                // SW_RESTORE also comes from the second-instance path. Sync WinForms visibility.
+                if (!Visible) Show();
+            }
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -450,8 +504,11 @@ namespace TapUp
                 engine.Stopped -= EngineStopped;
                 collector.Changed -= ChestChanged;
                 collector.Dispose();
+                if (trayIcon != null) trayIcon.Dispose();
+                trayIcon = null;
                 captionFont.Dispose();
                 counterFont.Dispose();
+                settingsFont.Dispose();
                 appIcon.Dispose();
             }
             base.Dispose(disposing);
@@ -490,7 +547,7 @@ namespace TapUp
         }
     }
 
-    internal sealed class InputSafeCheckBox : CheckBox
+    internal class InputSafeCheckBox : CheckBox
     {
         protected override void OnKeyDown(KeyEventArgs e)
         {
@@ -518,6 +575,12 @@ namespace TapUp
             if (e.KeyCode == Keys.F13) { e.Handled = true; e.SuppressKeyPress = true; return; }
             base.OnKeyUp(e);
         }
+    }
+
+    internal sealed class SettingsButton : InputSafeButton
+    {
+        // Retain the standard keyboard focus cues without painting a default-button border.
+        public override void NotifyDefault(bool value) { base.NotifyDefault(false); }
     }
 
     internal sealed class CaptionButton : InputSafeButton

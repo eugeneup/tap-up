@@ -66,6 +66,7 @@ namespace TapUp
 
     internal sealed class ChestConnection : IChestCollector
     {
+        internal const string SteamExchangeError = "Не удалось собрать сундук: ошибка Steam.";
         private readonly object gate = new object();
         private readonly object lifecycle = new object();
         private readonly ManualResetEvent stopped = new ManualResetEvent(false);
@@ -171,7 +172,7 @@ namespace TapUp
         {
             if (state.Index < 0 || state.Index > 1) throw new InvalidDataException("Unknown chest");
             sessionCounter.Observe(game, state);
-            gameErrors[state.Index] = state.Error.Length == 0 ? null : "Не удалось собрать сундук: ошибка Steam.";
+            gameErrors[state.Index] = state.Error.Length == 0 ? null : SteamExchangeError;
             error = gameErrors[0] ?? gameErrors[1];
             string detail = state.Pending ? "сбор…" : state.Error.Length != 0 ? "ошибка Steam" :
                 state.Ready ? (state.Affordable ? "готов" : "нужно 1000 нажатий") :
