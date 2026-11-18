@@ -12,9 +12,11 @@ namespace TapUp
 {
     internal static class GamePatch
     {
-        // Nine verified Windows depot manifests share these five originals.
+        // Ten verified Windows depot manifests share these six originals.
         // New hashes must pass the compatibility audit before being added.
         private static readonly string[] OriginalHashes = {
+            // Steam build 26754239, Windows depot manifest 2186243361634716529.
+            "825BDAD753912D2AAF70918E46C0326AD00E279D1A6B4BD5B145F6EB84231F24",
             // Steam build 26538670, Windows depot manifest 1792075920147193060.
             "8F75DF923B6F36F45633F27823AD8D9C63DFA5D42759635D9918857361AF31A2",
             "D6209ECCE915E15AADF4DE11191EEF5C6D3C6AAAFBD82A67C773B72070AE54CB",
