@@ -21,7 +21,7 @@ try {
     Copy-Item -LiteralPath LICENSE -Destination dist\LICENSE -Force
     @('Mono.Cecil 0.11.6 (MIT)', 'https://github.com/jbevain/cecil', '', (Get-Content -LiteralPath vendor\Mono.Cecil.LICENSE.txt -Raw)) | Set-Content -LiteralPath dist\THIRD-PARTY-NOTICES.txt -Encoding utf8
     if ($BuildTools) {
-        & $compiler /nologo /target:exe /main:GamePatchCli /platform:x64 /optimize+ /warnaserror+ /out:build\GamePatch.exe @gameReferences src\GamePatch.cs tools\GamePatchCli.cs
+        & $compiler /nologo /target:exe /main:GamePatchCli /platform:x64 /optimize+ /warnaserror+ /out:build\GamePatch.exe @gameReferences src\GamePatch.cs src\ChestGameContract.cs tools\GamePatchCli.cs
         if ($LASTEXITCODE -ne 0) { throw 'Game setup CLI build failed.' }
         & $compiler /nologo /target:exe /main:ChestProbe /platform:x64 /optimize+ /warnaserror+ /out:build\ChestProbe.exe src\ChestConnection.cs tools\ChestProbe.cs
         if ($LASTEXITCODE -ne 0) { throw 'Chest probe build failed.' }
@@ -44,7 +44,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Chest test build failed.' }
         & .\build\ChestUI.Tests.exe
         if ($LASTEXITCODE -ne 0) { throw 'Chest tests failed.' }
-        & $compiler /nologo /target:exe /main:GameBridgeTests /platform:x64 /optimize+ /warnaserror+ /out:build\GameBridge.Tests.exe @gameReferences /reference:build\TapUp.BongoBridge.dll src\GamePatch.cs src\ChestConnection.cs tests\GameBridgeTests.cs
+        & $compiler /nologo /target:exe /main:GameBridgeTests /platform:x64 /optimize+ /warnaserror+ /out:build\GameBridge.Tests.exe @gameReferences /reference:build\TapUp.BongoBridge.dll src\GamePatch.cs src\ChestGameContract.cs src\ChestConnection.cs tests\GameBridgeTests.cs
         if ($LASTEXITCODE -ne 0) { throw 'Game bridge test build failed.' }
         & .\build\GameBridge.Tests.exe
         if ($LASTEXITCODE -ne 0) { throw 'Game bridge tests failed.' }
